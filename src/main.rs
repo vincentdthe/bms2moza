@@ -8,6 +8,7 @@ use tailcall::tailcall;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 
+
 const TICK_SLEEP_TIME: Duration = time::Duration::from_millis(10);
 const WAITING_SIM_AND_TELEMETRY_SLEEP_TIME: Duration = time::Duration::from_millis(300);
 const TCP_BIND_ADDRESS: &str = "127.0.0.1:1234";
@@ -15,92 +16,93 @@ const TCP_BIND_ADDRESS: &str = "127.0.0.1:1234";
 fn main() {
     println!("[INFO] Initializing TCP server on {}", TCP_BIND_ADDRESS);
     let listener = TcpListener::bind(TCP_BIND_ADDRESS).expect("[ERROR] Cannot bind to TCP port");
+    listener.set_nonblocking(true).expect("[ERROR] Failed to set listener to non-blocking");
 
-    println!("[INFO] Waiting for BMS to start...");
-    let flight_data = Arc::new(wait_for_flight_data());
-    let intellivibe_data = Arc::new(wait_for_intellivibe_data());     
-    println!("[INFO] BMS memory mapped. Starting TCP loop...");
-
-    // Shared state for managing clients
     let clients: Arc<Mutex<HashMap<String, TcpStream>>> = Arc::new(Mutex::new(HashMap::new()));
-    let should_stop = Arc::new(Mutex::new(false));
 
-    // Data generation thread - mimics the LuaExportAfterNextFrame behavior
-    let clients_clone = Arc::clone(&clients);
-    let flight_data_clone = Arc::clone(&flight_data);
-    let intellivibe_data_clone = Arc::clone(&intellivibe_data);
-    let should_stop_clone = Arc::clone(&should_stop);
+    // let internal_addr_marker = Arc::new(Mutex::new(None::<SocketAddr>)); // Keep this dummy so .lock() doesn't panic  //decomment to enable the internal client
 
-    let data_thread = thread::spawn(move || {
-        data_sender_loop(clients_clone, flight_data_clone, intellivibe_data_clone, should_stop_clone);
-    });
+    loop {
+        // Clean up disconnected clients before restarting telemetry
+        clients.lock().unwrap().retain(|_, stream| stream.peer_addr().is_ok());
 
-/*
-//// INTERNAL CLIENT DEBUGGER: Disabled for production use
+        println!("[INFO] Waiting for BMS to start...");
+        let flight_data = Arc::new(wait_for_flight_data());
+        let intellivibe_data = Arc::new(wait_for_intellivibe_data());
+        println!("[INFO] BMS memory mapped. Starting telemetry loop...");
+        println!("[INFO] BMS restarted and memory remapped.");
 
-// let clients_internal = Arc::clone(&clients);
-// let internal_addr_marker = Arc::new(Mutex::new(None::<SocketAddr>));
-// let internal_addr_marker_clone = Arc::clone(&internal_addr_marker);
+        let should_stop = Arc::new(Mutex::new(false));
 
-// thread::spawn(move || {
-//     thread::sleep(Duration::from_millis(500)); // Wait for server to be ready
-//     println!("[DEBUG] Internal client attempting to connect to server...");
-//     match TcpStream::connect(TCP_BIND_ADDRESS) {
-//         Ok(stream) => {
-//             println!("[DEBUG] Internal client connected to server.");
-//             stream.set_nonblocking(true).expect("Failed to set non-blocking");
-//             let peer = stream.peer_addr().unwrap();
-//             {
-//                 let mut clients_map = clients_internal.lock().unwrap();
-//                 clients_map.insert(format!("internal_{}", peer), stream);
-//             }
-//             *internal_addr_marker_clone.lock().unwrap() = Some(peer);
-//             println!("[DEBUG] Internal client registered");
-//         }
-//         Err(e) => println!("[ERROR] Internal client connection failed: {}", e),
-//     }
-// });
-*/
+        let clients_clone = Arc::clone(&clients);
+        let flight_data_clone = Arc::clone(&flight_data);
+        let intellivibe_data_clone = Arc::clone(&intellivibe_data);
+        let should_stop_clone = Arc::clone(&should_stop);
 
-//commented to disable compilation warning after commenting internal client code
-//let internal_addr_marker = Arc::new(Mutex::new(None::<SocketAddr>)); // Keep this dummy so .lock() doesn't panic
+        let data_thread = thread::spawn(move || {
+            data_sender_loop(clients_clone, flight_data_clone, intellivibe_data_clone, should_stop_clone);
+        });
 
-    // Accept external connections (like MOZA Cockpit)
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                let peer_addr = stream.peer_addr().unwrap();
-
-                // Commented out internal client check
-                // Skip registering the internal client again
-                // if let Some(internal_addr) = *internal_addr_marker.lock().unwrap() {
-                        //     if peer_addr == internal_addr {
-                //         continue;
-                //     }
-                // }
-
-                println!("[INFO] External client connected: {}", peer_addr);
-                stream.set_nonblocking(true).expect("Failed to set non-blocking");
-
-                {
-                    let mut clients_map = clients.lock().unwrap();
-                    clients_map.insert(format!("external_{}", peer_addr), stream);
+        // Accept external connections
+        loop {
+            match listener.accept() {
+                Ok((stream, addr)) => {
+                    stream.set_nonblocking(true).expect("Failed to set non-blocking");
+                    println!("[INFO] External client connected: {}", addr);
+                    clients.lock().unwrap().insert(format!("external_{}", addr), stream);
                 }
-
-                println!("[DEBUG] External client registered: {}", peer_addr);
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    if *should_stop.lock().unwrap() {
+                        break;
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) => {
+                    println!("[ERROR] Failed to accept connection: {}", e);
+                    break;
+                }
             }
-            Err(e) => println!("[ERROR] Connection failed: {}", e),
         }
+
+        let _ = data_thread.join();
+
+        if !*should_stop.lock().unwrap() {
+            break;
+        }
+
+        println!("[INFO] Waiting for BMS to relaunch...");
+
+        /*
+        // INTERNAL CLIENT DEBUGGER: Disabled for production use
+
+        let clients_internal = Arc::clone(&clients);
+        let internal_addr_marker = Arc::new(Mutex::new(None::<SocketAddr>));
+        let internal_addr_marker_clone = Arc::clone(&internal_addr_marker);
+
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(500)); // Wait for server to be ready
+            println!("[DEBUG] Internal client attempting to connect to server...");
+            match TcpStream::connect(TCP_BIND_ADDRESS) {
+                Ok(stream) => {
+                    println!("[DEBUG] Internal client connected to server.");
+                    stream.set_nonblocking(true).expect("Failed to set non-blocking");
+                    let peer = stream.peer_addr().unwrap();
+                    {
+                        let mut clients_map = clients_internal.lock().unwrap();
+                        clients_map.insert(format!("internal_{}", peer), stream);
+                    }
+                    *internal_addr_marker_clone.lock().unwrap() = Some(peer);
+                    println!("[DEBUG] Internal client registered");
+                }
+                Err(e) => println!("[ERROR] Internal client connection failed: {}", e),
+            }
+        });
+        */
     }
-
-    // Wait for data thread to complete to avoid exiting immediately
-    let _ = data_thread.join();
-
-    //fn compute_is_on_ground(intellivibe: &IntellivibeData) -> bool {
-    //intellivibe.on_ground
-    //}
-
 }
+
+
+
 fn data_sender_loop(
     clients: Arc<Mutex<HashMap<String, TcpStream>>>,
     flight_data: Arc<MemoryFile<'static, FlightData>>,
@@ -144,8 +146,8 @@ fn data_sender_loop(
             || intellivibe_data_current.end_flight
         {
             println!("[DEBUG] Paused/Ejecting/EndFlight detected, sending zero data.");
-            //compute_zero_data() //commented to try to sort the vibration issue after exiting and re-entering mission
-            continue; // skip sending anything - addedd to address what described in the above comment
+            compute_zero_data() //was fixed
+            //continue; // skip sending anything - addedd to address the vibration issue after exiting and re-entering mission
 
         } else {
             let msg = compute_actual_flight_data(&flight_data_current, &intellivibe_data_current);
@@ -292,9 +294,7 @@ fn compute_actual_flight_data(
     // The reference code uses flight_data.rpm for thrust
     // You may need to find the right field for afterburner detection
     let afterburner = if flight_data.rpm > 0.8 { 1.0 } else { 0.0 };
-    // Alternative approaches:
-    // - Check if there's a ftit (fan turbine inlet temperature) field
-    // - Check if there's a nozzle position field
+    //TODOs:
     // - Use engine RPM threshold as approximation
     data.push_str(&format!("afterburner_1,{:.2};", afterburner));
     data.push_str(&format!("afterburner_2,{:.2};", afterburner)); // F-16 has single engine
@@ -323,8 +323,8 @@ fn compute_zero_data() -> String {
     let mut data = String::new();
     data.push_str("aircraft_name,F-16C_50;");
     data.push_str("engine_rpm_left,0.00;engine_rpm_right,0.00;");
-    data.push_str("gearSuccess,true;gear_value,1.00;"); // Gear down when stopped
-    data.push_str("acc_x,0.00;acc_y,0.00;acc_z,9.81;"); // Just gravity
+    data.push_str("gearSuccess,true;gear_value,0.00;"); // Gear down when stopped
+    data.push_str("acc_x,0.00;acc_y,0.00;acc_z,0;"); // Just gravity
     data.push_str("wind_x,0.00;wind_y,0.00;wind_z,0.00;");
     data.push_str("vector_velocity_x,0.00;vector_velocity_y,0.00;vector_velocity_z,0.00;");
     data.push_str("tas,0.00;ias,0.00;vertical_velocity_speed,0.00;");
