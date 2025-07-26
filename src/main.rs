@@ -144,7 +144,9 @@ fn data_sender_loop(
             || intellivibe_data_current.end_flight
         {
             println!("[DEBUG] Paused/Ejecting/EndFlight detected, sending zero data.");
-            compute_zero_data()
+            //compute_zero_data() //commented to try to sort the vibration issue after exiting and re-entering mission
+            continue; // skip sending anything - addedd to address what described in the above comment
+
         } else {
             let msg = compute_actual_flight_data(&flight_data_current, &intellivibe_data_current);
             println!("[DEBUG] Sending data: {}", msg.chars().take(100).collect::<String>() + "...");
