@@ -1,5 +1,6 @@
 use bms_sm::*;
-use std::net::{TcpListener, TcpStream, SocketAddr};
+//use std::net::{TcpListener, TcpStream, SocketAddr}; //commented to disable the internal clent
+use std::net::{TcpListener, TcpStream};
 use std::{io::Write, thread, time};
 use std::time::Duration;
 use std::io::Read;
@@ -61,7 +62,8 @@ fn main() {
 // });
 */
 
-let internal_addr_marker = Arc::new(Mutex::new(None::<SocketAddr>)); // Keep this dummy so .lock() doesn't panic
+//commented to disable compilation warning after commenting internal client code
+//let internal_addr_marker = Arc::new(Mutex::new(None::<SocketAddr>)); // Keep this dummy so .lock() doesn't panic
 
     // Accept external connections (like MOZA Cockpit)
     for stream in listener.incoming() {
@@ -69,8 +71,8 @@ let internal_addr_marker = Arc::new(Mutex::new(None::<SocketAddr>)); // Keep thi
             Ok(stream) => {
                 let peer_addr = stream.peer_addr().unwrap();
 
-                // Skip registering the internal client again
                 // Commented out internal client check
+                // Skip registering the internal client again
                 // if let Some(internal_addr) = *internal_addr_marker.lock().unwrap() {
                         //     if peer_addr == internal_addr {
                 //         continue;
