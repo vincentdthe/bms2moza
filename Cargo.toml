@@ -1,0 +1,8 @@
+[package]
+name = "bms2moza"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bms-sm = "0.1.2"
+tailcall = "1.0.1"
