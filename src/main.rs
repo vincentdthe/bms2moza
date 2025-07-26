@@ -34,29 +34,34 @@ fn main() {
         data_sender_loop(clients_clone, flight_data_clone, intellivibe_data_clone, should_stop_clone);
     });
 
-    // Internal client connection - mimics DCS self-connection
-    let clients_internal = Arc::clone(&clients);
-    let internal_addr_marker = Arc::new(Mutex::new(None::<SocketAddr>));
-    let internal_addr_marker_clone = Arc::clone(&internal_addr_marker);
+/*
+//// INTERNAL CLIENT DEBUGGER: Disabled for production use
 
-    thread::spawn(move || {
-        thread::sleep(Duration::from_millis(500)); // Wait for server to be ready
-        println!("[DEBUG] Internal client attempting to connect to server...");
-        match TcpStream::connect(TCP_BIND_ADDRESS) {
-            Ok(stream) => {
-                println!("[DEBUG] Internal client connected to server.");
-                stream.set_nonblocking(true).expect("Failed to set non-blocking");
-                let peer = stream.peer_addr().unwrap();
-                {
-                    let mut clients_map = clients_internal.lock().unwrap();
-                    clients_map.insert(format!("internal_{}", peer), stream);
-                }
-                *internal_addr_marker_clone.lock().unwrap() = Some(peer);
-                println!("[DEBUG] Internal client registered");
-            }
-            Err(e) => println!("[ERROR] Internal client connection failed: {}", e),
-        }
-    });
+// let clients_internal = Arc::clone(&clients);
+// let internal_addr_marker = Arc::new(Mutex::new(None::<SocketAddr>));
+// let internal_addr_marker_clone = Arc::clone(&internal_addr_marker);
+
+// thread::spawn(move || {
+//     thread::sleep(Duration::from_millis(500)); // Wait for server to be ready
+//     println!("[DEBUG] Internal client attempting to connect to server...");
+//     match TcpStream::connect(TCP_BIND_ADDRESS) {
+//         Ok(stream) => {
+//             println!("[DEBUG] Internal client connected to server.");
+//             stream.set_nonblocking(true).expect("Failed to set non-blocking");
+//             let peer = stream.peer_addr().unwrap();
+//             {
+//                 let mut clients_map = clients_internal.lock().unwrap();
+//                 clients_map.insert(format!("internal_{}", peer), stream);
+//             }
+//             *internal_addr_marker_clone.lock().unwrap() = Some(peer);
+//             println!("[DEBUG] Internal client registered");
+//         }
+//         Err(e) => println!("[ERROR] Internal client connection failed: {}", e),
+//     }
+// });
+*/
+
+let internal_addr_marker = Arc::new(Mutex::new(None::<SocketAddr>)); // Keep this dummy so .lock() doesn't panic
 
     // Accept external connections (like MOZA Cockpit)
     for stream in listener.incoming() {
@@ -65,11 +70,12 @@ fn main() {
                 let peer_addr = stream.peer_addr().unwrap();
 
                 // Skip registering the internal client again
-                if let Some(internal_addr) = *internal_addr_marker.lock().unwrap() {
-                    if peer_addr == internal_addr {
-                        continue;
-                    }
-                }
+                // Commented out internal client check
+                // if let Some(internal_addr) = *internal_addr_marker.lock().unwrap() {
+                        //     if peer_addr == internal_addr {
+                //         continue;
+                //     }
+                // }
 
                 println!("[INFO] External client connected: {}", peer_addr);
                 stream.set_nonblocking(true).expect("Failed to set non-blocking");
