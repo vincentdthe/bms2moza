@@ -17,7 +17,7 @@ fn main() {
 
     println!("[INFO] Waiting for BMS to start...");
     let flight_data = Arc::new(wait_for_flight_data());
-    let intellivibe_data = Arc::new(wait_for_intellivibe_data());
+    let intellivibe_data = Arc::new(wait_for_intellivibe_data());     
     println!("[INFO] BMS memory mapped. Starting TCP loop...");
 
     // Shared state for managing clients
@@ -87,6 +87,11 @@ fn main() {
 
     // Wait for data thread to complete to avoid exiting immediately
     let _ = data_thread.join();
+
+    //fn compute_is_on_ground(intellivibe: &IntellivibeData) -> bool {
+    //intellivibe.on_ground
+    //}
+
 }
 fn data_sender_loop(
     clients: Arc<Mutex<HashMap<String, TcpStream>>>,
@@ -211,7 +216,7 @@ fn wait_for_intellivibe_data() -> MemoryFile<'static, IntellivibeData> {
 
 fn compute_actual_flight_data(
     flight_data: &FlightData,
-    intellivibe_data: &IntellivibeData,
+    _intellivibe_data: &IntellivibeData,
 ) -> String {
     // Convert BMS data to MOZA format (key,value;key,value;...)
     let mut data = String::new();
@@ -220,9 +225,10 @@ fn compute_actual_flight_data(
     data.push_str("aircraft_name,F-16C_50;");
     
     // Engine RPM (BMS has single engine, duplicate for left/right)
-    let engine_rpm = flight_data.rpm * 100.0; // Convert to percentage-like value
+    let engine_rpm = flight_data.rpm;
     data.push_str(&format!("engine_rpm_left,{:.2};", engine_rpm));
     data.push_str(&format!("engine_rpm_right,{:.2};", engine_rpm));
+
     
     // Gear (from BMS gear_pos: 0.0 = up, 1.0 = down)
     data.push_str("gearSuccess,true;");
