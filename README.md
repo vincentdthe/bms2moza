@@ -14,3 +14,4 @@ https://github.com/Bartosso/bms-to-ffbeast/tree/main
 /// TODO ////
 
 Improve the quantity and quality of data that can be taken from BMS shared memory and converted for use with what Moza Cockpit app expects
+Add the F-15C 
