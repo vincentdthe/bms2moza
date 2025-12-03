@@ -1,5 +1,4 @@
-
-use bms_sm::*;
+use bms_sm :: *;
 use std::net::{TcpListener, TcpStream};
 use std::{io::Write, thread, time};
 use std::time::Duration;
@@ -90,6 +89,7 @@ fn data_sender_loop(
     // Default fallback values
     let mut current_ac_name = "F-16C_50".to_string();
     let mut _is_single_engine = true; 
+    let mut first_ac_name_detected = false; // Flag to ensure initial detection is always printed
 
     loop {
         thread::sleep(TICK_SLEEP_TIME);
@@ -97,98 +97,116 @@ fn data_sender_loop(
 
         // Update string data periodically (every 1 second approx)
         if tick_count % 100 == 0 {
-            // StringData::read() is a static method returning Result<HashMap<StringId, String>, ...>
-            if let Ok(strings_map) = StringData::read() {
-                if let Some(bms_name) = strings_map.get(&StringId::AcName) {
-                    if bms_name.contains("F-15") {
-                         current_ac_name = "F-15C".to_string();
-                         _is_single_engine = false; 
-                    } else if bms_name.contains("F/A-18") {
-                         current_ac_name = "F/A-18C".to_string();
-                         _is_single_engine = false; 
-                    } else {
-                         current_ac_name = "F-16C_50".to_string();
-                         _is_single_engine = true; 
-                    }
-                }
-            }
-        }
-
-        let intellivibe_data_current = intellivibe_data.read();
-        if intellivibe_data_current.exit_game {
-            println!("[INFO] Exit flag detected. Sending stop signal and terminating.");
-            
-            let stop_msg = "export_stop,true;";
-            {
-                let mut clients_map = clients.lock().unwrap();
-                clients_map.retain(|id, stream| {
-                    match stream.write_all(stop_msg.as_bytes()) {
-                        Ok(_) => {
-                            let _ = stream.flush();
-                            println!("[DEBUG] Sent stop signal to client: {}", id);
-                            false 
-                        }
-                        Err(e) => {
-                            println!("[ERROR] Failed to send stop signal to {}: {}", id, e);
-                            false 
-                        }
-                    }
-                });
-            }
-            
-            *should_stop.lock().unwrap() = true;
-            break;
-        }
-
-        let flight_data_current = flight_data.read();
-
-        let output = if intellivibe_data_current.paused
-            || intellivibe_data_current.ejecting
-            || intellivibe_data_current.end_flight
-        {
-            // Use defaults/zeros when paused
-            compute_zero_data(&current_ac_name) 
-        } else {
-            compute_actual_flight_data(
-                &flight_data_current, 
-                &intellivibe_data_current, 
-                &current_ac_name,
-            )
-        };
-
-        // Send data to all connected clients
-        {
-            let mut clients_map = clients.lock().unwrap();
-            clients_map.retain(|id, stream| {
-                let mut buffer = [0; 512];
-                match stream.read(&mut buffer) {
-                    Ok(0) => {
-                        println!("[INFO] Client {} disconnected", id);
-                        return false; 
-                    }
-                    Ok(_) => {} // Consume input
-                    Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                    Err(e) => {
-                        println!("[ERROR] Client {} read error: {}", id, e);
-                        return false; 
-                    }
-                }
-
-                match stream.write_all(output.as_bytes()) {
-                    Ok(_) => {
-                        if let Err(e) = stream.flush() {
-                            println!("[WARN] Failed to flush stream for {}: {}", id, e);
-                        }
-                        true 
-                    }
-                    Err(e) => {
-                        println!("[ERROR] Failed to write to {}: {}", id, e);
-                        false 
-                    }
-                }
-            });
-        }
-    }
+            match StringData::read() {
+                Ok(strings_map) => {
+                    if let Some(bms_name) = strings_map.get(&StringId::AcName) {
+                        let old_current_ac_name = current_ac_name.clone(); // Capture old value for comparison
+                                            if bms_name.is_empty() {
+                                                 current_ac_name = String::new();
+                                            } else if bms_name.contains("F-15") {
+                                                 current_ac_name = "F-15C".to_string();
+                                                 _is_single_engine = false; 
+                                            } else if bms_name.contains("F/A-18") {
+                                                 current_ac_name = "F/A-18C".to_string();
+                                                 _is_single_engine = false; 
+                                            } else {
+                                                 current_ac_name = "F-16C_50".to_string();
+                                                 _is_single_engine = true; 
+                                            }
+                                            
+                                            // Always print the first detection, and subsequent changes
+                                            if !first_ac_name_detected || old_current_ac_name != current_ac_name {
+                                                println!("[INFO] Detected BMS aircraft: \"{}\", sending to Moza as: \"{}\"", bms_name, current_ac_name);
+                                                first_ac_name_detected = true;
+                                            }
+                                        } else {
+                                            println!("[WARN] AcName not found in StringData map.");
+                                        }
+                                    },
+                                    Err(e) => {
+                                        println!("[ERROR] Failed to read StringData: {}", e);
+                                    }
+                                }
+                            }
+                        
+                            let intellivibe_data_current = intellivibe_data.read();
+                            if intellivibe_data_current.exit_game {
+                                println!("[INFO] Exit flag detected. Sending stop signal and terminating.");
+                                
+                                let stop_msg = "export_stop,true;";
+                                {
+                                    let mut clients_map = clients.lock().unwrap();
+                                    clients_map.retain(|id, stream| {
+                                        match stream.write_all(stop_msg.as_bytes()) {
+                                            Ok(_) => {
+                                                let _ = stream.flush();
+                                                println!("[DEBUG] Sent stop signal to client: {}", id);
+                                                false 
+                                            }
+                                            Err(e) => {
+                                                println!("[ERROR] Failed to send stop signal to {}: {}", id, e);
+                                                false 
+                                            }
+                                        }
+                                    });
+                                }
+                                
+                                *should_stop.lock().unwrap() = true;
+                                break;
+                            }
+                        
+                            let flight_data_current = flight_data.read();
+                        
+                            let output = if intellivibe_data_current.paused
+                                || intellivibe_data_current.ejecting
+                                || intellivibe_data_current.end_flight
+                            {
+                                // Use defaults/zeros when paused
+                                compute_zero_data(&current_ac_name) 
+                            } else {
+                                compute_actual_flight_data(
+                                    &flight_data_current, 
+                                    &intellivibe_data_current, 
+                                    &current_ac_name,
+                                )
+                            };
+                        
+                            // Send data to all connected clients
+                            {
+                                let mut clients_map = clients.lock().unwrap();
+                                clients_map.retain(|id, stream| {
+                                    let mut buffer = [0; 512];
+                                    match stream.read(&mut buffer) {
+                                        Ok(0) => {
+                                            println!("[INFO] Client {} disconnected", id);
+                                            return false; 
+                                        }
+                                        Ok(_) => {} // Consume input
+                                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                                        Err(e) => {
+                                            println!("[ERROR] Client {} read error: {}", id, e);
+                                            return false; 
+                                        }
+                                    }
+                        
+                                    if !current_ac_name.is_empty() {
+                                        match stream.write_all(output.as_bytes()) {
+                                            Ok(_) => {
+                                                if let Err(e) = stream.flush() {
+                                                    println!("[WARN] Failed to flush stream for {}: {}", id, e);
+                                                }
+                                                true 
+                                            }
+                                            Err(e) => {
+                                                println!("[ERROR] Failed to write to {}: {}", id, e);
+                                                false 
+                                            }
+                                        }
+                                    } else {
+                                        true // Keep client connected, but send nothing
+                                    }
+                                });
+                            }    }
 }
 
 #[tailcall]
