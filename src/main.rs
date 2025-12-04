@@ -107,7 +107,7 @@ fn data_sender_loop(
                                                  current_ac_name = "F-15C".to_string();
                                                  _is_single_engine = false; 
                                             } else if bms_name.contains("F/A-18") {
-                                                 current_ac_name = "F/A-18C".to_string();
+                                                 current_ac_name = "FA-18C_hornet".to_string();
                                                  _is_single_engine = false; 
                                             } else {
                                                  current_ac_name = "F-16C_50".to_string();
