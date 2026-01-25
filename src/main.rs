@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 const TICK_SLEEP_TIME: Duration = time::Duration::from_millis(10);
 const WAITING_SIM_AND_TELEMETRY_SLEEP_TIME: Duration = time::Duration::from_millis(300);
-const TCP_BIND_ADDRESS: &str = "127.0.0.1:1234";
+const TCP_BIND_ADDRESS: &str = "127.0.0.1:3476";
 
 fn main() {
     println!("[INFO] Initializing TCP server on {}", TCP_BIND_ADDRESS);
