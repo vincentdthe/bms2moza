@@ -6,16 +6,40 @@ use std::io::Read;
 use tailcall::tailcall;
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
+use ini::Ini;
 
 
 const TICK_SLEEP_TIME: Duration = time::Duration::from_millis(10);
 const WAITING_SIM_AND_TELEMETRY_SLEEP_TIME: Duration = time::Duration::from_millis(300);
-const TCP_BIND_ADDRESS: &str = "127.0.0.1:3476";
+//const TCP_BIND_ADDRESS: &str = "127.0.0.1:3476";
+
+fn load_config() -> String {
+    let filename = "moza2bms_config.ini";
+
+    //creates ini file at the first run
+    if std::fs::metadata(filename).is_err() {
+        println!("[INFO] config.ini not found. Creating default configuration...");
+        let mut conf = Ini::new();
+        conf.with_section(Some("Network"))
+            .set("ip", "127.0.0.1")
+            .set("port", "3476"); // default Moza cockpit port starting dcs script version 10.0.0.2
+
+        let _ = conf.write_to_file(filename);
+    }
+
+    // loads ini file
+    let conf = Ini::load_from_file(filename).unwrap_or_else(|_| Ini::new());
+    let section = conf.section(Some("Network"));
+    let ip = section.and_then(|s| s.get("ip")).unwrap_or("127.0.0.1");
+    let port = section.and_then(|s| s.get("port")).unwrap_or("3476");
+
+    format!("{}:{}", ip, port)
+}
 
 fn main() {
-    println!("[INFO] Initializing TCP server on {}", TCP_BIND_ADDRESS);
-    let listener = TcpListener::bind(TCP_BIND_ADDRESS).expect("[ERROR] Cannot bind to TCP port");
-    listener.set_nonblocking(true).expect("[ERROR] Failed to set listener to non-blocking");
+    let bind_address = load_config(); 
+    println!("[INFO] Initializing TCP server on {}", bind_address);
+    let listener = TcpListener::bind(&bind_address).expect("[ERROR] Cannot bind to TCP port");
 
     let clients: Arc<Mutex<HashMap<String, TcpStream>>> = Arc::new(Mutex::new(HashMap::new()));
 
